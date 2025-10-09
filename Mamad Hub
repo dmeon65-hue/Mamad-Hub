@@ -1,0 +1,24 @@
+local scripts = {
+    ["8254797842"] = "https://raw.githubusercontent.com/Karlshen00/Chizu-hub/refs/heads/main/Fit%20Piece%202",
+    ["7540891731"] = "https://raw.githubusercontent.com/Karlshen00/Chizu-hub/refs/heads/main/Red%20light%20Green%20light",
+    ["10253248401"] = "https://raw.githubusercontent.com/Karlshen00/Chizu-hub/refs/heads/main/elemetal%20power%20tycoon",
+    ["17841624878"] = "https://raw.githubusercontent.com/Karlshen00/Chizu-hub/refs/heads/main/Trollge%20Games"
+}
+
+local placeId = tostring(game.PlaceId)
+local scriptUrl = scripts[placeId]
+
+if scriptUrl then
+    -- Display notification
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Mamad hub is loading",
+        Text = "Made by Mamad",
+        Duration = 3
+    })
+
+    print("Loading script for game ID:", placeId)
+    loadstring(game:HttpGet(scriptUrl))()
+    print("Made by Mamad From Manggarejo")  -- Message after script execution
+else
+    print("No script available for this game ID:", placeId)
+end
