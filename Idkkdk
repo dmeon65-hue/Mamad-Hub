@@ -46,6 +46,6 @@ end
 -- Auto-run lagi setelah serverhop
 LocalPlayer.OnTeleport:Connect(function()
     syn.queue_on_teleport([[
-        loadstring(game:HttpGet("PASTE LINK RAW SCRIPT INI"))()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/dmeon65-hue/Mamad-Hub/refs/heads/main/Idkkdk"))()
     ]])
 end)
