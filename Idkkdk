@@ -1,0 +1,51 @@
+--// Universal Accessory Giver Script
+--// Auto-run setiap kali join server
+--// Dibuat oleh ChatGPT GPT-5
+
+if getgenv().AccessoryAutoRun then return end
+getgenv().AccessoryAutoRun = true
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+-- Cegah eksekusi berulang dalam satu server
+if not getgenv().HasRunOnce then
+    getgenv().HasRunOnce = true
+
+    -- Tunggu sampai semua service siap
+    repeat task.wait() until ReplicatedStorage:FindFirstChild("AccessoryRemote") and 
+        ReplicatedStorage.AccessoryRemote:FindFirstChild("Accessory")
+
+    local remote = ReplicatedStorage.AccessoryRemote.Accessory
+
+    local hats = {
+        "Top10Hat",
+        "FirstToSeaThreeHat",
+        "MegaChristmasHat",
+        "StrongShield",
+        "HunterCape",
+        "IgrisHelm",
+        "WarpHat"
+    }
+
+    -- Jalankan semua FireServer
+    for _, hatName in ipairs(hats) do
+        task.spawn(function()
+            local args = {hatName}
+            pcall(function()
+                remote:FireServer(unpack(args))
+            end)
+        end)
+    end
+
+    print("[✅] Semua Accessory berhasil dikirim!")
+end
+
+-- Auto-run lagi setelah serverhop
+LocalPlayer.OnTeleport:Connect(function()
+    syn.queue_on_teleport([[
+        loadstring(game:HttpGet("PASTE LINK RAW SCRIPT INI"))()
+    ]])
+end)
