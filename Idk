@@ -1,0 +1,1228 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Stats = game:GetService("Stats")
+local StarterGui = game:GetService("StarterGui")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local Camera = workspace.CurrentCamera
+
+if PlayerGui:FindFirstChild("PlayerGuiSystem") then
+    PlayerGui:FindFirstChild("PlayerGuiSystem"):Destroy()
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PlayerGuiSystem"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = PlayerGui
+
+local espHighlights = {}
+local espBillboards = {}
+local espDistanceLabels = {}
+local espHealthLabels = {}
+local currentSpectating = nil
+local spectateConnection = nil
+local walkConnection = nil
+local walkTarget = nil
+local isGuiOpen = true
+local shimmerValue = 0
+local notifQueue = {}
+local isNotifShowing = false
+local espAllActive = false
+local espChamsActive = false
+local espIndividual = {}
+local playerRows = {}
+local favoritesList = {}
+local searchText = ""
+local currentTheme = 1
+local minimapEnabled = false
+local minimapConnection = nil
+local fpsLabel = nil
+local lastFrameTime = tick()
+local frameCount = 0
+local currentFPS = 0
+
+local themes = {
+    {name="Galaxy", primary=Color3.fromRGB(70,0,170), secondary=Color3.fromRGB(120,0,220), accent=Color3.fromRGB(150,80,255), bg=Color3.fromRGB(8,0,30), glow=Color3.fromRGB(120,60,255)},
+    {name="Neon", primary=Color3.fromRGB(0,100,180), secondary=Color3.fromRGB(0,180,255), accent=Color3.fromRGB(0,220,255), bg=Color3.fromRGB(0,10,25), glow=Color3.fromRGB(0,150,255)},
+    {name="Blood", primary=Color3.fromRGB(150,0,0), secondary=Color3.fromRGB(200,0,0), accent=Color3.fromRGB(255,60,60), bg=Color3.fromRGB(20,0,0), glow=Color3.fromRGB(200,0,0)},
+    {name="Mint", primary=Color3.fromRGB(0,120,80), secondary=Color3.fromRGB(0,180,120), accent=Color3.fromRGB(100,255,180), bg=Color3.fromRGB(0,15,10), glow=Color3.fromRGB(0,200,130)},
+}
+
+local function getTheme()
+    return themes[currentTheme]
+end
+
+local function createGradient(parent, c1, c2, rot)
+    local g = Instance.new("UIGradient")
+    g.Color = ColorSequence.new({ColorSequenceKeypoint.new(0,c1),ColorSequenceKeypoint.new(1,c2)})
+    g.Rotation = rot or 135
+    g.Parent = parent
+    return g
+end
+
+local function applyGlow(frame, color)
+    local s = Instance.new("UIStroke")
+    s.Color = color
+    s.Thickness = 1.5
+    s.Parent = frame
+    return s
+end
+
+local function makeDraggable(frame, handle)
+    local h = handle or frame
+    local dragging = false
+    local dragStart, startPos
+
+    h.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+
+    h.InputChanged:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMove) and dragging then
+            local delta = input.Position - dragStart
+            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+delta.X, startPos.Y.Scale, startPos.Y.Offset+delta.Y)
+        end
+    end)
+end
+
+local function showNotif(text, color, duration)
+    table.insert(notifQueue, {text=text, color=color or getTheme().accent, duration=duration or 2.5})
+    if isNotifShowing then return end
+    isNotifShowing = true
+    coroutine.wrap(function()
+        while #notifQueue > 0 do
+            local data = table.remove(notifQueue, 1)
+            local nf = Instance.new("Frame")
+            nf.Size = UDim2.new(0, 240, 0, 44)
+            nf.Position = UDim2.new(0.5, -120, 0, -60)
+            nf.BackgroundColor3 = Color3.fromRGB(8, 0, 28)
+            nf.BorderSizePixel = 0
+            nf.ZIndex = 50
+            nf.Parent = ScreenGui
+            Instance.new("UICorner", nf).CornerRadius = UDim.new(0, 12)
+            applyGlow(nf, data.color)
+            createGradient(nf, Color3.fromRGB(15,0,45), Color3.fromRGB(40,0,75))
+
+            local bar = Instance.new("Frame")
+            bar.Size = UDim2.new(0, 4, 1, -10)
+            bar.Position = UDim2.new(0, 6, 0, 5)
+            bar.BackgroundColor3 = data.color
+            bar.BorderSizePixel = 0
+            bar.ZIndex = 51
+            bar.Parent = nf
+            Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 4)
+
+            local nl = Instance.new("TextLabel")
+            nl.Size = UDim2.new(1, -22, 1, 0)
+            nl.Position = UDim2.new(0, 18, 0, 0)
+            nl.BackgroundTransparency = 1
+            nl.Text = text
+            nl.TextColor3 = Color3.fromRGB(230, 210, 255)
+            nl.TextSize = 12
+            nl.Font = Enum.Font.GothamBold
+            nl.TextXAlignment = Enum.TextXAlignment.Left
+            nl.ZIndex = 51
+            nl.Parent = nf
+
+            TweenService:Create(nf, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Position=UDim2.new(0.5,-120,0,12)}):Play()
+            wait(data.duration)
+            TweenService:Create(nf, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Position=UDim2.new(0.5,-120,0,-60)}):Play()
+            wait(0.35)
+            nf:Destroy()
+        end
+        isNotifShowing = false
+    end)()
+end
+
+local function makeBtn(parent, text, xOff, w, color, h)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, w or 38, 0, h or 22)
+    btn.Position = UDim2.new(0, xOff, 0.5, -((h or 22)/2))
+    btn.BackgroundColor3 = color or Color3.fromRGB(60, 0, 140)
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 9
+    btn.Font = Enum.Font.GothamBold
+    btn.ZIndex = 8
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundTransparency=0.3}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.15), {BackgroundTransparency=0}):Play()
+    end)
+
+    return btn
+end
+
+local function makeLabel(parent, text, size, xpos, color, align)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = size or UDim2.new(1,-10,1,0)
+    lbl.Position = xpos or UDim2.new(0,5,0,0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = color or Color3.fromRGB(220,190,255)
+    lbl.TextSize = 11
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextXAlignment = align or Enum.TextXAlignment.Left
+    lbl.TextTruncate = Enum.TextTruncate.AtEnd
+    lbl.ZIndex = 8
+    lbl.Parent = parent
+    return lbl
+end
+
+local function makeRow(parent, height)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, 0, 0, height or 32)
+    row.BackgroundColor3 = Color3.fromRGB(15, 3, 40)
+    row.BorderSizePixel = 0
+    row.ZIndex = 7
+    row.Parent = parent
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 8)
+    applyGlow(row, Color3.fromRGB(60,25,130))
+    return row
+end
+
+local function makeSectionLabel(parent, text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1,0,0,22)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "  ✦ " .. text
+    lbl.TextColor3 = getTheme().accent
+    lbl.TextSize = 11
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.ZIndex = 7
+    lbl.Parent = parent
+    return lbl
+end
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Name = "ToggleBtn"
+ToggleBtn.Size = UDim2.new(0, 46, 0, 46)
+ToggleBtn.Position = UDim2.new(0, 10, 0.5, -23)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 0, 55)
+ToggleBtn.BorderSizePixel = 0
+ToggleBtn.Text = "✦"
+ToggleBtn.TextColor3 = Color3.fromRGB(200, 150, 255)
+ToggleBtn.TextSize = 22
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.ZIndex = 10
+ToggleBtn.Parent = ScreenGui
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 13)
+local toggleStroke = applyGlow(ToggleBtn, Color3.fromRGB(150, 100, 255))
+createGradient(ToggleBtn, Color3.fromRGB(40,0,100), Color3.fromRGB(90,0,150))
+makeDraggable(ToggleBtn)
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 310, 0, 500)
+MainFrame.Position = UDim2.new(0.5, -155, 0.5, -250)
+MainFrame.BackgroundColor3 = Color3.fromRGB(5, 0, 20)
+MainFrame.BorderSizePixel = 0
+MainFrame.ZIndex = 5
+MainFrame.ClipsDescendants = true
+MainFrame.Parent = ScreenGui
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 16)
+local mainStroke = applyGlow(MainFrame, Color3.fromRGB(120, 60, 255))
+createGradient(MainFrame, Color3.fromRGB(8,0,30), Color3.fromRGB(22,0,50))
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 52)
+TitleBar.BackgroundColor3 = Color3.fromRGB(15, 0, 55)
+TitleBar.BorderSizePixel = 0
+TitleBar.ZIndex = 6
+TitleBar.Parent = MainFrame
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 16)
+createGradient(TitleBar, getTheme().primary, getTheme().secondary, 90)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -110, 1, 0)
+TitleLabel.Position = UDim2.new(0, 12, 0, 0)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Text = "✦ Player Gui ✦"
+TitleLabel.TextColor3 = Color3.fromRGB(240, 215, 255)
+TitleLabel.TextSize = 17
+TitleLabel.Font = Enum.Font.GothamBold
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+TitleLabel.ZIndex = 7
+TitleLabel.Parent = TitleBar
+
+local VersionLabel = Instance.new("TextLabel")
+VersionLabel.Size = UDim2.new(1, -110, 0, 14)
+VersionLabel.Position = UDim2.new(0, 12, 1, -16)
+VersionLabel.BackgroundTransparency = 1
+VersionLabel.Text = "galaxy edition v3"
+VersionLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+VersionLabel.TextSize = 10
+VersionLabel.Font = Enum.Font.Gotham
+VersionLabel.TextXAlignment = Enum.TextXAlignment.Left
+VersionLabel.ZIndex = 7
+VersionLabel.Parent = TitleBar
+
+local PingLabel = Instance.new("TextLabel")
+PingLabel.Size = UDim2.new(0, 55, 0, 22)
+PingLabel.Position = UDim2.new(1, -115, 0.5, -11)
+PingLabel.BackgroundColor3 = Color3.fromRGB(0, 20, 0)
+PingLabel.BackgroundTransparency = 0.3
+PingLabel.Text = "-- ms"
+PingLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+PingLabel.TextSize = 10
+PingLabel.Font = Enum.Font.GothamBold
+PingLabel.ZIndex = 7
+PingLabel.Parent = TitleBar
+Instance.new("UICorner", PingLabel).CornerRadius = UDim.new(0, 6)
+
+fpsLabel = Instance.new("TextLabel")
+fpsLabel.Size = UDim2.new(0, 48, 0, 22)
+fpsLabel.Position = UDim2.new(1, -58, 0.5, -11)
+fpsLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 20)
+fpsLabel.BackgroundTransparency = 0.3
+fpsLabel.Text = "-- fps"
+fpsLabel.TextColor3 = Color3.fromRGB(180, 180, 255)
+fpsLabel.TextSize = 10
+fpsLabel.Font = Enum.Font.GothamBold
+fpsLabel.ZIndex = 7
+fpsLabel.Parent = TitleBar
+Instance.new("UICorner", fpsLabel).CornerRadius = UDim.new(0, 6)
+
+makeDraggable(MainFrame, TitleBar)
+
+local SearchFrame = Instance.new("Frame")
+SearchFrame.Size = UDim2.new(1, -10, 0, 28)
+SearchFrame.Position = UDim2.new(0, 5, 0, 54)
+SearchFrame.BackgroundColor3 = Color3.fromRGB(12, 2, 35)
+SearchFrame.BorderSizePixel = 0
+SearchFrame.ZIndex = 6
+SearchFrame.Parent = MainFrame
+Instance.new("UICorner", SearchFrame).CornerRadius = UDim.new(0, 8)
+applyGlow(SearchFrame, Color3.fromRGB(80, 40, 180))
+
+local SearchIcon = Instance.new("TextLabel")
+SearchIcon.Size = UDim2.new(0, 22, 1, 0)
+SearchIcon.Position = UDim2.new(0, 4, 0, 0)
+SearchIcon.BackgroundTransparency = 1
+SearchIcon.Text = "🔍"
+SearchIcon.TextSize = 12
+SearchIcon.Font = Enum.Font.Gotham
+SearchIcon.ZIndex = 7
+SearchIcon.Parent = SearchFrame
+
+local SearchBox = Instance.new("TextBox")
+SearchBox.Size = UDim2.new(1, -30, 1, -6)
+SearchBox.Position = UDim2.new(0, 26, 0, 3)
+SearchBox.BackgroundTransparency = 1
+SearchBox.Text = ""
+SearchBox.PlaceholderText = "Cari player..."
+SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 100, 180)
+SearchBox.TextColor3 = Color3.fromRGB(220, 200, 255)
+SearchBox.TextSize = 11
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.TextXAlignment = Enum.TextXAlignment.Left
+SearchBox.ClearTextOnFocus = false
+SearchBox.ZIndex = 7
+SearchBox.Parent = SearchFrame
+
+local TabFrame = Instance.new("Frame")
+TabFrame.Size = UDim2.new(1, -10, 0, 28)
+TabFrame.Position = UDim2.new(0, 5, 0, 86)
+TabFrame.BackgroundColor3 = Color3.fromRGB(12, 2, 35)
+TabFrame.BorderSizePixel = 0
+TabFrame.ZIndex = 6
+TabFrame.Parent = MainFrame
+Instance.new("UICorner", TabFrame).CornerRadius = UDim.new(0, 8)
+applyGlow(TabFrame, Color3.fromRGB(70, 25, 160))
+
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.FillDirection = Enum.FillDirection.Horizontal
+tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabLayout.Padding = UDim.new(0, 2)
+tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+tabLayout.Parent = TabFrame
+
+local currentTab = "Players"
+
+local function createTabBtn(name, order)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 72, 0, 22)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 0, 65)
+    btn.BorderSizePixel = 0
+    btn.Text = name
+    btn.TextColor3 = Color3.fromRGB(170, 130, 255)
+    btn.TextSize = 10
+    btn.Font = Enum.Font.GothamBold
+    btn.ZIndex = 7
+    btn.LayoutOrder = order
+    btn.Parent = TabFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
+
+local TabPlayers = createTabBtn("Players", 1)
+local TabESP = createTabBtn("ESP", 2)
+local TabInfo = createTabBtn("Info", 3)
+local TabSettings = createTabBtn("Settings", 4)
+
+local ContentHolder = Instance.new("Frame")
+ContentHolder.Size = UDim2.new(1, -10, 1, -120)
+ContentHolder.Position = UDim2.new(0, 5, 0, 118)
+ContentHolder.BackgroundTransparency = 1
+ContentHolder.ZIndex = 6
+ContentHolder.Parent = MainFrame
+
+local function createScrollContainer()
+    local sf = Instance.new("ScrollingFrame")
+    sf.Size = UDim2.new(1, 0, 1, 0)
+    sf.BackgroundTransparency = 1
+    sf.BorderSizePixel = 0
+    sf.ScrollBarThickness = 3
+    sf.ScrollBarImageColor3 = getTheme().accent
+    sf.CanvasSize = UDim2.new(0, 0, 0, 0)
+    sf.ZIndex = 6
+    sf.Visible = false
+    sf.Parent = ContentHolder
+
+    local ll = Instance.new("UIListLayout")
+    ll.SortOrder = Enum.SortOrder.LayoutOrder
+    ll.Padding = UDim.new(0, 5)
+    ll.Parent = sf
+
+    local lp = Instance.new("UIPadding")
+    lp.PaddingTop = UDim.new(0, 4)
+    lp.PaddingLeft = UDim.new(0, 2)
+    lp.PaddingRight = UDim.new(0, 2)
+    lp.Parent = sf
+
+    ll:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        sf.CanvasSize = UDim2.new(0, 0, 0, ll.AbsoluteContentSize.Y + 15)
+    end)
+
+    return sf
+end
+
+local PlayersScroll = createScrollContainer()
+PlayersScroll.Visible = true
+local ESPScroll = createScrollContainer()
+local InfoScroll = createScrollContainer()
+local SettingsScroll = createScrollContainer()
+
+local function switchTab(name)
+    currentTab = name
+    PlayersScroll.Visible = (name == "Players")
+    ESPScroll.Visible = (name == "ESP")
+    InfoScroll.Visible = (name == "Info")
+    SettingsScroll.Visible = (name == "Settings")
+
+    local tabMap = {["Players"]=TabPlayers, ["ESP"]=TabESP, ["Info"]=TabInfo, ["Settings"]=TabSettings}
+    for k, v in pairs(tabMap) do
+        if k == name then
+            v.BackgroundColor3 = getTheme().primary
+            v.TextColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            v.BackgroundColor3 = Color3.fromRGB(25, 0, 65)
+            v.TextColor3 = Color3.fromRGB(170, 130, 255)
+        end
+    end
+end
+
+TabPlayers.MouseButton1Click:Connect(function() switchTab("Players") end)
+TabESP.MouseButton1Click:Connect(function() switchTab("ESP") end)
+TabInfo.MouseButton1Click:Connect(function() switchTab("Info") end)
+TabSettings.MouseButton1Click:Connect(function() switchTab("Settings") end)
+switchTab("Players")
+
+local function addESPToPlayer(player)
+    if player == LocalPlayer then return end
+    local char = player.Character
+    if not char then return end
+
+    if espHighlights[player.Name] then espHighlights[player.Name]:Destroy() end
+    if espBillboards[player.Name] then espBillboards[player.Name]:Destroy() end
+
+    local hl = Instance.new("Highlight")
+    hl.Adornee = char
+    hl.FillColor = getTheme().primary
+    hl.OutlineColor = getTheme().accent
+    hl.FillTransparency = espChamsActive and 0 or 0.5
+    hl.OutlineTransparency = 0
+    hl.Parent = char
+    espHighlights[player.Name] = hl
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        local bb = Instance.new("BillboardGui")
+        bb.Size = UDim2.new(0, 130, 0, 50)
+        bb.StudsOffset = Vector3.new(0, 4.5, 0)
+        bb.Adornee = hrp
+        bb.AlwaysOnTop = true
+        bb.Parent = hrp
+
+        local nameL = Instance.new("TextLabel")
+        nameL.Size = UDim2.new(1, 0, 0.5, 0)
+        nameL.BackgroundTransparency = 1
+        nameL.Text = "✦ " .. player.Name
+        nameL.TextColor3 = getTheme().accent
+        nameL.TextSize = 13
+        nameL.Font = Enum.Font.GothamBold
+        nameL.TextStrokeTransparency = 0
+        nameL.Parent = bb
+
+        local distL = Instance.new("TextLabel")
+        distL.Size = UDim2.new(1, 0, 0.25, 0)
+        distL.Position = UDim2.new(0, 0, 0.5, 0)
+        distL.BackgroundTransparency = 1
+        distL.Text = "-- studs"
+        distL.TextColor3 = Color3.fromRGB(180, 255, 180)
+        distL.TextSize = 10
+        distL.Font = Enum.Font.Gotham
+        distL.TextStrokeTransparency = 0
+        distL.Parent = bb
+        espDistanceLabels[player.Name] = distL
+
+        local hpL = Instance.new("TextLabel")
+        hpL.Size = UDim2.new(1, 0, 0.25, 0)
+        hpL.Position = UDim2.new(0, 0, 0.75, 0)
+        hpL.BackgroundTransparency = 1
+        hpL.Text = "HP: --"
+        hpL.TextColor3 = Color3.fromRGB(255, 150, 150)
+        hpL.TextSize = 10
+        hpL.Font = Enum.Font.Gotham
+        hpL.TextStrokeTransparency = 0
+        hpL.Parent = bb
+        espHealthLabels[player.Name] = hpL
+
+        espBillboards[player.Name] = bb
+    end
+end
+
+local function removeESPFromPlayer(player)
+    if espHighlights[player.Name] then
+        espHighlights[player.Name]:Destroy()
+        espHighlights[player.Name] = nil
+    end
+    if espBillboards[player.Name] then
+        espBillboards[player.Name]:Destroy()
+        espBillboards[player.Name] = nil
+    end
+    espDistanceLabels[player.Name] = nil
+    espHealthLabels[player.Name] = nil
+end
+
+makeSectionLabel(ESPScroll, "Global ESP")
+
+local espAllRow = makeRow(ESPScroll, 36)
+makeLabel(espAllRow, "ESP Semua Player", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0))
+local espAllBtn = makeBtn(espAllRow, "OFF", 200, 62, Color3.fromRGB(55, 0, 130))
+
+espAllBtn.MouseButton1Click:Connect(function()
+    espAllActive = not espAllActive
+    if espAllActive then
+        espAllBtn.Text = "ON ✦"
+        espAllBtn.BackgroundColor3 = getTheme().primary
+        for _, p in pairs(Players:GetPlayers()) do addESPToPlayer(p) end
+        showNotif("ESP Semua Player ON")
+    else
+        espAllBtn.Text = "OFF"
+        espAllBtn.BackgroundColor3 = Color3.fromRGB(55, 0, 130)
+        for _, p in pairs(Players:GetPlayers()) do removeESPFromPlayer(p) end
+        showNotif("ESP Semua Player OFF", Color3.fromRGB(255, 80, 80))
+    end
+end)
+
+local espChamsRow = makeRow(ESPScroll, 36)
+makeLabel(espChamsRow, "Chams (Solid Fill)", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0))
+local espChamsBtn = makeBtn(espChamsRow, "OFF", 200, 62, Color3.fromRGB(55, 0, 130))
+
+espChamsBtn.MouseButton1Click:Connect(function()
+    espChamsActive = not espChamsActive
+    if espChamsActive then
+        espChamsBtn.Text = "ON ✦"
+        espChamsBtn.BackgroundColor3 = getTheme().primary
+        for _, hl in pairs(espHighlights) do hl.FillTransparency = 0 end
+        showNotif("Chams ON")
+    else
+        espChamsBtn.Text = "OFF"
+        espChamsBtn.BackgroundColor3 = Color3.fromRGB(55, 0, 130)
+        for _, hl in pairs(espHighlights) do hl.FillTransparency = 0.5 end
+        showNotif("Chams OFF", Color3.fromRGB(255, 80, 80))
+    end
+end)
+
+makeSectionLabel(ESPScroll, "ESP Color")
+
+local colorRow = makeRow(ESPScroll, 36)
+makeLabel(colorRow, "Warna ESP", UDim2.new(0, 100, 1, 0), UDim2.new(0, 6, 0, 0))
+local colorBtns = {
+    {name="Purple", c=Color3.fromRGB(150,0,255)},
+    {name="Red", c=Color3.fromRGB(255,0,80)},
+    {name="Blue", c=Color3.fromRGB(0,150,255)},
+    {name="Green", c=Color3.fromRGB(0,255,150)},
+}
+for i, cd in pairs(colorBtns) do
+    local cb = makeBtn(colorRow, "", 100 + (i-1)*44, 40, cd.c)
+    cb.BackgroundColor3 = cd.c
+    cb.Text = ""
+    local dot = makeLabel(cb, "●", UDim2.new(1,0,1,0), UDim2.new(0,0,0,0), Color3.fromRGB(255,255,255), Enum.TextXAlignment.Center)
+    dot.TextSize = 16
+    cb.MouseButton1Click:Connect(function()
+        for _, hl in pairs(espHighlights) do
+            hl.FillColor = cd.c
+            hl.OutlineColor = cd.c
+        end
+        showNotif("Warna ESP: " .. cd.name)
+    end)
+end
+
+makeSectionLabel(InfoScroll, "Server Info")
+
+local function infoRow(parent, label)
+    local row = makeRow(parent, 34)
+    makeLabel(row, label, UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0), Color3.fromRGB(200, 170, 255))
+    local val = makeLabel(row, "...", UDim2.new(0, 120, 1, 0), UDim2.new(0, 138, 0, 0), Color3.fromRGB(180, 255, 180))
+    return val
+end
+
+local plrCountVal = infoRow(InfoScroll, "Jumlah Player:")
+local gameIdVal = infoRow(InfoScroll, "Game ID:")
+local placeVerVal = infoRow(InfoScroll, "Place Ver:")
+local jobIdVal = infoRow(InfoScroll, "Job ID:")
+local regionVal = infoRow(InfoScroll, "Region:")
+
+makeSectionLabel(InfoScroll, "My Info")
+
+local myAgeRow = makeRow(InfoScroll, 34)
+makeLabel(myAgeRow, "Umur Akun:", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0), Color3.fromRGB(200, 170, 255))
+local myAge = LocalPlayer.AccountAge
+local yr = math.floor(myAge/365)
+local mo = math.floor((myAge%365)/30)
+local dy = myAge%30
+makeLabel(myAgeRow, yr.."th "..mo.."bl "..dy.."hr", UDim2.new(0, 120, 1, 0), UDim2.new(0, 138, 0, 0), Color3.fromRGB(180, 255, 180))
+
+local myIdRow = makeRow(InfoScroll, 34)
+makeLabel(myIdRow, "User ID:", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0), Color3.fromRGB(200, 170, 255))
+makeLabel(myIdRow, tostring(LocalPlayer.UserId), UDim2.new(0, 120, 1, 0), UDim2.new(0, 138, 0, 0), Color3.fromRGB(180, 255, 180))
+
+local speedRow = makeRow(InfoScroll, 34)
+makeLabel(speedRow, "Speed:", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0), Color3.fromRGB(200, 170, 255))
+local speedVal = makeLabel(speedRow, "0 ws", UDim2.new(0, 120, 1, 0), UDim2.new(0, 138, 0, 0), Color3.fromRGB(180, 255, 180))
+
+local jumpRow = makeRow(InfoScroll, 34)
+makeLabel(jumpRow, "JumpPower:", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0), Color3.fromRGB(200, 170, 255))
+local jumpVal = makeLabel(jumpRow, "0", UDim2.new(0, 120, 1, 0), UDim2.new(0, 138, 0, 0), Color3.fromRGB(180, 255, 180))
+
+makeSectionLabel(InfoScroll, "Quick Actions")
+
+local chatRow = makeRow(InfoScroll, 36)
+makeLabel(chatRow, "Chat Spam (test)", UDim2.new(0, 140, 1, 0), UDim2.new(0, 6, 0, 0))
+local chatBox = Instance.new("TextBox")
+chatBox.Size = UDim2.new(0, 0, 0, 0)
+chatBox.Visible = false
+chatBox.Parent = InfoScroll
+local chatBtn = makeBtn(chatRow, "CHAT", 200, 62, Color3.fromRGB(60, 0, 140))
+chatBtn.MouseButton1Click:Connect(function()
+    showNotif("Chat via executor, gunakan sendiri")
+end)
+
+makeSectionLabel(SettingsScroll, "Theme")
+
+local themeRow = makeRow(SettingsScroll, 36)
+makeLabel(themeRow, "Pilih Tema:", UDim2.new(0, 90, 1, 0), UDim2.new(0, 6, 0, 0))
+for i, t in pairs(themes) do
+    local tb = makeBtn(themeRow, t.name, 90 + (i-1)*54, 52, t.primary)
+    tb.TextSize = 8
+    tb.MouseButton1Click:Connect(function()
+        currentTheme = i
+        createGradient(TitleBar, getTheme().primary, getTheme().secondary, 90)
+        mainStroke.Color = getTheme().glow
+        showNotif("Tema: " .. t.name)
+    end)
+end
+
+makeSectionLabel(SettingsScroll, "Minimap")
+
+local minimapRow = makeRow(SettingsScroll, 36)
+makeLabel(minimapRow, "Minimap Player", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0))
+local minimapBtn = makeBtn(minimapRow, "OFF", 200, 62, Color3.fromRGB(55, 0, 130))
+
+local MinimapFrame = Instance.new("Frame")
+MinimapFrame.Size = UDim2.new(0, 140, 0, 140)
+MinimapFrame.Position = UDim2.new(1, -155, 1, -155)
+MinimapFrame.BackgroundColor3 = Color3.fromRGB(5, 0, 20)
+MinimapFrame.BackgroundTransparency = 0.2
+MinimapFrame.BorderSizePixel = 0
+MinimapFrame.ZIndex = 15
+MinimapFrame.Visible = false
+MinimapFrame.Parent = ScreenGui
+Instance.new("UICorner", MinimapFrame).CornerRadius = UDim.new(0, 70)
+applyGlow(MinimapFrame, Color3.fromRGB(100, 50, 200))
+makeDraggable(MinimapFrame)
+
+local minimapTitle = Instance.new("TextLabel")
+minimapTitle.Size = UDim2.new(1, 0, 0, 18)
+minimapTitle.Position = UDim2.new(0, 0, 0, 4)
+minimapTitle.BackgroundTransparency = 1
+minimapTitle.Text = "✦ MINIMAP"
+minimapTitle.TextColor3 = Color3.fromRGB(200, 160, 255)
+minimapTitle.TextSize = 10
+minimapTitle.Font = Enum.Font.GothamBold
+minimapTitle.TextXAlignment = Enum.TextXAlignment.Center
+minimapTitle.ZIndex = 16
+minimapTitle.Parent = MinimapFrame
+
+local minimapDots = {}
+
+minimapBtn.MouseButton1Click:Connect(function()
+    minimapEnabled = not minimapEnabled
+    MinimapFrame.Visible = minimapEnabled
+    if minimapEnabled then
+        minimapBtn.Text = "ON ✦"
+        minimapBtn.BackgroundColor3 = getTheme().primary
+        showNotif("Minimap ON")
+    else
+        minimapBtn.Text = "OFF"
+        minimapBtn.BackgroundColor3 = Color3.fromRGB(55, 0, 130)
+        for _, d in pairs(minimapDots) do d:Destroy() end
+        minimapDots = {}
+        showNotif("Minimap OFF", Color3.fromRGB(255, 80, 80))
+    end
+end)
+
+makeSectionLabel(SettingsScroll, "GUI Size")
+
+local sizeRow = makeRow(SettingsScroll, 36)
+makeLabel(sizeRow, "Ukuran GUI:", UDim2.new(0, 90, 1, 0), UDim2.new(0, 6, 0, 0))
+local sizeSmall = makeBtn(sizeRow, "Kecil", 94, 52, Color3.fromRGB(55, 0, 130))
+local sizeMed = makeBtn(sizeRow, "Sedang", 150, 52, Color3.fromRGB(80, 0, 160))
+local sizeLarge = makeBtn(sizeRow, "Besar", 206, 52, Color3.fromRGB(55, 0, 130))
+
+sizeSmall.MouseButton1Click:Connect(function()
+    TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size=UDim2.new(0,240,0,380)}):Play()
+    showNotif("GUI Kecil")
+end)
+sizeMed.MouseButton1Click:Connect(function()
+    TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size=UDim2.new(0,310,0,500)}):Play()
+    showNotif("GUI Sedang")
+end)
+sizeLarge.MouseButton1Click:Connect(function()
+    TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size=UDim2.new(0,380,0,600)}):Play()
+    showNotif("GUI Besar")
+end)
+
+makeSectionLabel(SettingsScroll, "Misc")
+
+local noclipActive = false
+local noclipRow = makeRow(SettingsScroll, 36)
+makeLabel(noclipRow, "Noclip", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0))
+local noclipBtn = makeBtn(noclipRow, "OFF", 200, 62, Color3.fromRGB(55, 0, 130))
+local noclipConn = nil
+
+noclipBtn.MouseButton1Click:Connect(function()
+    noclipActive = not noclipActive
+    if noclipActive then
+        noclipBtn.Text = "ON ✦"
+        noclipBtn.BackgroundColor3 = getTheme().primary
+        noclipConn = RunService.Stepped:Connect(function()
+            if noclipActive then
+                local char = LocalPlayer.Character
+                if char then
+                    for _, part in pairs(char:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end
+        end)
+        showNotif("Noclip ON")
+    else
+        noclipBtn.Text = "OFF"
+        noclipBtn.BackgroundColor3 = Color3.fromRGB(55, 0, 130)
+        if noclipConn then noclipConn:Disconnect() noclipConn = nil end
+        showNotif("Noclip OFF", Color3.fromRGB(255, 80, 80))
+    end
+end)
+
+local infiniteJumpActive = false
+local ijRow = makeRow(SettingsScroll, 36)
+makeLabel(ijRow, "Infinite Jump", UDim2.new(0, 130, 1, 0), UDim2.new(0, 6, 0, 0))
+local ijBtn = makeBtn(ijRow, "OFF", 200, 62, Color3.fromRGB(55, 0, 130))
+
+UserInputService.JumpRequest:Connect(function()
+    if infiniteJumpActive then
+        local char = LocalPlayer.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end
+end)
+
+ijBtn.MouseButton1Click:Connect(function()
+    infiniteJumpActive = not infiniteJumpActive
+    if infiniteJumpActive then
+        ijBtn.Text = "ON ✦"
+        ijBtn.BackgroundColor3 = getTheme().primary
+        showNotif("Infinite Jump ON")
+    else
+        ijBtn.Text = "OFF"
+        ijBtn.BackgroundColor3 = Color3.fromRGB(55, 0, 130)
+        showNotif("Infinite Jump OFF", Color3.fromRGB(255, 80, 80))
+    end
+end)
+
+local function createPlayerRow(player)
+    local isFav = favoritesList[player.Name]
+    local isLocal = (player == LocalPlayer)
+
+    local row = makeRow(PlayersScroll, 36)
+    row.Name = "Row_" .. player.Name
+
+    if isFav then
+        row.BackgroundColor3 = Color3.fromRGB(25, 5, 55)
+    end
+
+    local favIcon = Instance.new("TextLabel")
+    favIcon.Size = UDim2.new(0, 14, 1, 0)
+    favIcon.Position = UDim2.new(0, 3, 0, 0)
+    favIcon.BackgroundTransparency = 1
+    favIcon.Text = isFav and "★" or "☆"
+    favIcon.TextColor3 = isFav and Color3.fromRGB(255, 220, 50) or Color3.fromRGB(100, 80, 160)
+    favIcon.TextSize = 12
+    favIcon.Font = Enum.Font.GothamBold
+    favIcon.ZIndex = 9
+    favIcon.Parent = row
+
+    local nameColor = isLocal and Color3.fromRGB(255, 220, 100) or (isFav and Color3.fromRGB(255, 200, 80) or Color3.fromRGB(220, 190, 255))
+    local displayName = isLocal and ("You") or player.Name
+    makeLabel(row, displayName, UDim2.new(0, 85, 1, 0), UDim2.new(0, 18, 0, 0), nameColor)
+
+    if not isLocal then
+        local EspBtn = makeBtn(row, "ESP", 105, 33, Color3.fromRGB(55, 0, 130))
+        local SpecBtn = makeBtn(row, "SPEC", 142, 33, Color3.fromRGB(70, 0, 110))
+        local AgeBtn = makeBtn(row, "AGE", 179, 32, Color3.fromRGB(45, 0, 110))
+        local WalkBtn = makeBtn(row, "WALK", 215, 38, Color3.fromRGB(85, 0, 80))
+        local FavBtn = makeBtn(row, isFav and "★" or "☆", 257, 22, Color3.fromRGB(60, 40, 0))
+        FavBtn.TextColor3 = Color3.fromRGB(255, 220, 50)
+
+        local espOn = espIndividual[player.Name] or false
+        if espOn then
+            EspBtn.BackgroundColor3 = getTheme().primary
+            EspBtn.Text = "ESP✦"
+        end
+
+        EspBtn.MouseButton1Click:Connect(function()
+            espOn = not espOn
+            espIndividual[player.Name] = espOn
+            if espOn then
+                EspBtn.BackgroundColor3 = getTheme().primary
+                EspBtn.Text = "ESP✦"
+                addESPToPlayer(player)
+                showNotif("ESP ON: " .. player.Name)
+            else
+                EspBtn.BackgroundColor3 = Color3.fromRGB(55, 0, 130)
+                EspBtn.Text = "ESP"
+                removeESPFromPlayer(player)
+                showNotif("ESP OFF: " .. player.Name, Color3.fromRGB(255, 80, 80))
+            end
+        end)
+
+        SpecBtn.MouseButton1Click:Connect(function()
+            if currentSpectating == player.Name then
+                currentSpectating = nil
+                if spectateConnection then spectateConnection:Disconnect() spectateConnection = nil end
+                local myChar = LocalPlayer.Character
+                if myChar then
+                    Camera.CameraType = Enum.CameraType.Custom
+                    Camera.CameraSubject = myChar:FindFirstChildOfClass("Humanoid")
+                end
+                SpecBtn.BackgroundColor3 = Color3.fromRGB(70, 0, 110)
+                SpecBtn.Text = "SPEC"
+                showNotif("Stop spectate", Color3.fromRGB(255, 80, 80))
+            else
+                if spectateConnection then spectateConnection:Disconnect() end
+                currentSpectating = player.Name
+                SpecBtn.BackgroundColor3 = getTheme().primary
+                SpecBtn.Text = "SPEC✦"
+                showNotif("Spectating: " .. player.Name)
+
+                spectateConnection = RunService.RenderStepped:Connect(function()
+                    if currentSpectating == player.Name then
+                        local char = player.Character
+                        if char then
+                            local hum = char:FindFirstChildOfClass("Humanoid")
+                            if hum then
+                                Camera.CameraType = Enum.CameraType.Custom
+                                Camera.CameraSubject = hum
+                            end
+                        end
+                    end
+                end)
+            end
+        end)
+
+        AgeBtn.MouseButton1Click:Connect(function()
+            local age = player.AccountAge
+            local py = math.floor(age/365)
+            local pm = math.floor((age%365)/30)
+            local pd = age%30
+
+            local popup = Instance.new("Frame")
+            popup.Size = UDim2.new(0, 240, 0, 115)
+            popup.Position = UDim2.new(0.5, -120, 0.5, -57)
+            popup.BackgroundColor3 = Color3.fromRGB(7, 0, 25)
+            popup.BorderSizePixel = 0
+            popup.ZIndex = 25
+            popup.Parent = ScreenGui
+            Instance.new("UICorner", popup).CornerRadius = UDim.new(0, 14)
+            applyGlow(popup, getTheme().glow)
+            createGradient(popup, Color3.fromRGB(18,0,55), Color3.fromRGB(45,0,85))
+            makeDraggable(popup)
+
+            local popHeader = Instance.new("Frame")
+            popHeader.Size = UDim2.new(1, 0, 0, 38)
+            popHeader.BackgroundColor3 = getTheme().primary
+            popHeader.BorderSizePixel = 0
+            popHeader.ZIndex = 26
+            popHeader.Parent = popup
+            Instance.new("UICorner", popHeader).CornerRadius = UDim.new(0, 14)
+
+            local popTitle = Instance.new("TextLabel")
+            popTitle.Size = UDim2.new(1, -10, 1, 0)
+            popTitle.Position = UDim2.new(0, 10, 0, 0)
+            popTitle.BackgroundTransparency = 1
+            popTitle.Text = "✦ " .. player.Name .. " | " .. player.DisplayName
+            popTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+            popTitle.TextSize = 12
+            popTitle.Font = Enum.Font.GothamBold
+            popTitle.TextXAlignment = Enum.TextXAlignment.Left
+            popTitle.ZIndex = 27
+            popTitle.Parent = popHeader
+
+            local popAge = Instance.new("TextLabel")
+            popAge.Size = UDim2.new(1, -10, 0, 22)
+            popAge.Position = UDim2.new(0, 10, 0, 40)
+            popAge.BackgroundTransparency = 1
+            popAge.Text = "🎂 Umur Akun: " .. py .. " tahun " .. pm .. " bulan " .. pd .. " hari"
+            popAge.TextColor3 = Color3.fromRGB(200, 255, 180)
+            popAge.TextSize = 11
+            popAge.Font = Enum.Font.Gotham
+            popAge.TextXAlignment = Enum.TextXAlignment.Left
+            popAge.ZIndex = 26
+            popAge.Parent = popup
+
+            local popId = Instance.new("TextLabel")
+            popId.Size = UDim2.new(1, -10, 0, 20)
+            popId.Position = UDim2.new(0, 10, 0, 63)
+            popId.BackgroundTransparency = 1
+            popId.Text = "🆔 User ID: " .. player.UserId
+            popId.TextColor3 = Color3.fromRGB(220, 190, 255)
+            popId.TextSize = 11
+            popId.Font = Enum.Font.Gotham
+            popId.TextXAlignment = Enum.TextXAlignment.Left
+            popId.ZIndex = 26
+            popId.Parent = popup
+
+            local closeBtn = makeBtn(popup, "✕ Tutup", 0, 80, Color3.fromRGB(80, 0, 160))
+            closeBtn.Position = UDim2.new(0.5, -40, 1, -28)
+            closeBtn.ZIndex = 27
+            closeBtn.MouseButton1Click:Connect(function() popup:Destroy() end)
+        end)
+
+        WalkBtn.MouseButton1Click:Connect(function()
+            if walkTarget == player.Name then
+                walkTarget = nil
+                if walkConnection then walkConnection:Disconnect() walkConnection = nil end
+                WalkBtn.BackgroundColor3 = Color3.fromRGB(85, 0, 80)
+                WalkBtn.Text = "WALK"
+                showNotif("Stop jalan ke " .. player.Name, Color3.fromRGB(255, 80, 80))
+            else
+                walkTarget = player.Name
+                WalkBtn.BackgroundColor3 = getTheme().secondary
+                WalkBtn.Text = "WALK✦"
+                showNotif("Jalan ke: " .. player.Name)
+
+                if walkConnection then walkConnection:Disconnect() end
+                walkConnection = RunService.Heartbeat:Connect(function()
+                    if walkTarget == player.Name then
+                        local myChar = LocalPlayer.Character
+                        local tChar = player.Character
+                        if myChar and tChar then
+                            local myHRP = myChar:FindFirstChild("HumanoidRootPart")
+                            local tHRP = tChar:FindFirstChild("HumanoidRootPart")
+                            local myHum = myChar:FindFirstChildOfClass("Humanoid")
+                            if myHRP and tHRP and myHum and (myHRP.Position - tHRP.Position).Magnitude > 5 then
+                                myHum:MoveTo(tHRP.Position)
+                            end
+                        end
+                    end
+                end)
+            end
+        end)
+
+        FavBtn.MouseButton1Click:Connect(function()
+            favoritesList[player.Name] = not favoritesList[player.Name]
+            local f = favoritesList[player.Name]
+            FavBtn.Text = f and "★" or "☆"
+            favIcon.Text = f and "★" or "☆"
+            favIcon.TextColor3 = f and Color3.fromRGB(255, 220, 50) or Color3.fromRGB(100, 80, 160)
+            row.BackgroundColor3 = f and Color3.fromRGB(25, 5, 55) or Color3.fromRGB(15, 3, 40)
+            showNotif(f and ("★ " .. player.Name .. " difavoritkan") or ("☆ " .. player.Name .. " dihapus dari favorit"))
+        end)
+    else
+        local youLabel = makeLabel(row, "[ Kamu ]", UDim2.new(0, 70, 1, 0), UDim2.new(0, 155, 0, 0), Color3.fromRGB(255, 220, 100), Enum.TextXAlignment.Center)
+    end
+
+    return row
+end
+
+local function refreshList()
+    for _, c in pairs(PlayersScroll:GetChildren()) do
+        if c:IsA("Frame") or (c:IsA("TextLabel") and c ~= nil) then
+            if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then
+                c:Destroy()
+            end
+        end
+    end
+    playerRows = {}
+
+    local plrList = Players:GetPlayers()
+    table.sort(plrList, function(a, b)
+        local af = favoritesList[a.Name] and 1 or 0
+        local bf = favoritesList[b.Name] and 1 or 0
+        if af ~= bf then return af > bf end
+        return a.Name < b.Name
+    end)
+
+    local secL = Instance.new("TextLabel")
+    secL.Size = UDim2.new(1, 0, 0, 22)
+    secL.BackgroundTransparency = 1
+    secL.Text = "  ✦ Players Online (" .. #plrList .. ")"
+    secL.TextColor3 = getTheme().accent
+    secL.TextSize = 11
+    secL.Font = Enum.Font.GothamBold
+    secL.TextXAlignment = Enum.TextXAlignment.Left
+    secL.ZIndex = 7
+    secL.Parent = PlayersScroll
+
+    for _, p in pairs(plrList) do
+        if searchText == "" or string.lower(p.Name):find(string.lower(searchText)) then
+            playerRows[p.Name] = createPlayerRow(p)
+        end
+    end
+end
+
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    searchText = SearchBox.Text
+    refreshList()
+end)
+
+refreshList()
+
+Players.PlayerAdded:Connect(function(p)
+    wait(0.5)
+    refreshList()
+    if espAllActive then addESPToPlayer(p) end
+    p.CharacterAdded:Connect(function()
+        wait(1)
+        if espAllActive or espIndividual[p.Name] then addESPToPlayer(p) end
+    end)
+    showNotif("✦ " .. p.Name .. " bergabung!", Color3.fromRGB(100, 255, 150))
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    removeESPFromPlayer(p)
+    if currentSpectating == p.Name then
+        currentSpectating = nil
+        if spectateConnection then spectateConnection:Disconnect() spectateConnection = nil end
+        Camera.CameraType = Enum.CameraType.Custom
+        local char = LocalPlayer.Character
+        if char then Camera.CameraSubject = char:FindFirstChildOfClass("Humanoid") end
+    end
+    if walkTarget == p.Name then
+        walkTarget = nil
+        if walkConnection then walkConnection:Disconnect() walkConnection = nil end
+    end
+    showNotif("✦ " .. p.Name .. " keluar!", Color3.fromRGB(255, 100, 100))
+    wait(0.2)
+    refreshList()
+end)
+
+for _, p in pairs(Players:GetPlayers()) do
+    p.CharacterAdded:Connect(function()
+        wait(1)
+        if espAllActive or espIndividual[p.Name] then addESPToPlayer(p) end
+    end)
+end
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    isGuiOpen = not isGuiOpen
+    if isGuiOpen then
+        MainFrame.Visible = true
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size=UDim2.new(0,310,0,500)}):Play()
+        ToggleBtn.Text = "✦"
+    else
+        TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {Size=UDim2.new(0,310,0,0)}):Play()
+        wait(0.3)
+        MainFrame.Visible = false
+        ToggleBtn.Text = "✧"
+    end
+end)
+
+RunService.RenderStepped:Connect(function(dt)
+    shimmerValue = shimmerValue + dt * 0.7
+    local a = (math.sin(shimmerValue) + 1) / 2
+    local theme = getTheme()
+    local glowColor = theme.glow
+    mainStroke.Color = Color3.fromRGB(
+        math.clamp(math.floor(glowColor.R*255 + a*40), 0, 255),
+        math.clamp(math.floor(glowColor.G*255 + a*20), 0, 255),
+        math.clamp(math.floor(glowColor.B*255 + a*30), 0, 255)
+    )
+    toggleStroke.Color = mainStroke.Color
+
+    local myChar = LocalPlayer.Character
+    local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+
+    if myHum then
+        speedVal.Text = math.round(myHum.WalkSpeed) .. " ws"
+        jumpVal.Text = tostring(math.round(myHum.JumpPower))
+    end
+
+    for name, dl in pairs(espDistanceLabels) do
+        local p = Players:FindFirstChild(name)
+        if p and p.Character then
+            local tHRP = p.Character:FindFirstChild("HumanoidRootPart")
+            if tHRP and myHRP then
+                dl.Text = math.round((myHRP.Position - tHRP.Position).Magnitude) .. " studs"
+            end
+        end
+    end
+
+    for name, hl in pairs(espHealthLabels) do
+        local p = Players:FindFirstChild(name)
+        if p and p.Character then
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                local hp = math.round(hum.Health)
+                local maxhp = math.round(hum.MaxHealth)
+                hl.Text = "HP: " .. hp .. "/" .. maxhp
+                local ratio = hp / math.max(maxhp, 1)
+                hl.TextColor3 = Color3.fromRGB(math.floor(255*(1-ratio)), math.floor(255*ratio), 80)
+            end
+        end
+    end
+
+    frameCount = frameCount + 1
+    if tick() - lastFrameTime >= 0.5 then
+        currentFPS = math.round(frameCount / (tick() - lastFrameTime))
+        frameCount = 0
+        lastFrameTime = tick()
+        if fpsLabel then
+            fpsLabel.Text = currentFPS .. " fps"
+            if currentFPS >= 55 then
+                fpsLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+            elseif currentFPS >= 30 then
+                fpsLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+            else
+                fpsLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            end
+        end
+    end
+
+    if minimapEnabled and myHRP then
+        for _, old in pairs(minimapDots) do old:Destroy() end
+        minimapDots = {}
+
+        local meDot = Instance.new("Frame")
+        meDot.Size = UDim2.new(0, 8, 0, 8)
+        meDot.AnchorPoint = Vector2.new(0.5, 0.5)
+        meDot.Position = UDim2.new(0.5, 0, 0.5, 0)
+        meDot.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+        meDot.BorderSizePixel = 0
+        meDot.ZIndex = 17
+        meDot.Parent = MinimapFrame
+        Instance.new("UICorner", meDot).CornerRadius = UDim.new(1, 0)
+        table.insert(minimapDots, meDot)
+
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local tHRP = p.Character:FindFirstChild("HumanoidRootPart")
+                if tHRP then
+                    local diff = tHRP.Position - myHRP.Position
+                    local scale = 1/100
+                    local rx = math.clamp(0.5 + diff.X * scale, 0.05, 0.95)
+                    local ry = math.clamp(0.5 + diff.Z * scale, 0.05, 0.95)
+
+                    local dot = Instance.new("Frame")
+                    dot.Size = UDim2.new(0, 6, 0, 6)
+                    dot.AnchorPoint = Vector2.new(0.5, 0.5)
+                    dot.Position = UDim2.new(rx, 0, ry, 0)
+                    dot.BackgroundColor3 = getTheme().accent
+                    dot.BorderSizePixel = 0
+                    dot.ZIndex = 17
+                    dot.Parent = MinimapFrame
+                    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
+                    local nameTag = Instance.new("TextLabel")
+                    nameTag.Size = UDim2.new(0, 50, 0, 12)
+                    nameTag.Position = UDim2.new(0.5, 0, 0, 0)
+                    nameTag.BackgroundTransparency = 1
+                    nameTag.Text = p.Name
+                    nameTag.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    nameTag.TextSize = 8
+                    nameTag.Font = Enum.Font.Gotham
+                    nameTag.ZIndex = 18
+                    nameTag.Parent = dot
+
+                    table.insert(minimapDots, dot)
+                end
+            end
+        end
+    end
+end)
+
+coroutine.wrap(function()
+    while true do
+        pcall(function()
+            local ping = math.round(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+            PingLabel.Text = ping .. " ms"
+            if ping < 100 then
+                PingLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+            elseif ping < 200 then
+                PingLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+            else
+                PingLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            end
+        end)
+
+        pcall(function()
+            plrCountVal.Text = tostring(#Players:GetPlayers())
+            gameIdVal.Text = tostring(game.GameId)
+            placeVerVal.Text = tostring(game.PlaceVersion)
+            local jid = game.JobId
+            jobIdVal.Text = jid ~= "" and string.sub(jid, 1, 14) .. ".." or "N/A"
+            regionVal.Text = "Asia/US"
+        end)
+
+        wait(1)
+    end
+end)()
+
+showNotif("✦ Player Gui v3 Galaxy Loaded!", getTheme().accent, 3)
